@@ -1,0 +1,2 @@
+-- pg_cron not enabled on this project — skipped.
+-- select cron.schedule(...) removed to prevent migration errors.

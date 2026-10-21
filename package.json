@@ -1,0 +1,42 @@
+{
+  "name": "singleuse-download-v1",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "audit:schema": "node scripts/audit-production-schema.js",
+    "test:schema": "node scripts/test-schema-consistency.js",
+    "test:e2e": "playwright test",
+    "start": "next start",
+    "lint": "next lint",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.115.0",
+    "lucide-react": "^1.40.0",
+    "next": "15.5.25",
+    "react": "^19",
+    "react-dom": "^19",
+    "recharts": "^3.10.1",
+    "stripe": "^22.6.1"
+  },
+  "overrides": {
+    "glob": "^10.5.0",
+    "postcss": "^8.5.28"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "eslint": "^8",
+    "eslint-config-next": "15.5.25",
+    "pg": "^8.23.1",
+    "postcss": "^8.5.28",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,49 @@
+how do i test if the [anon role cannot read stripe_live_secret_key, stripe_test_secret_key, stripe_live_webhook_secret, stripe_test_webhook_secret, resend_api_key]? Is it a query? wht is the query?
+
+
+Context
+Yes, it's a direct SQL query. Run this in your Supabase Dashboard → SQL Editor:
+
+-- Impersonate the anon role and try to read secret columns
+SET LOCAL ROLE anon;
+
+SELECT
+  stripe_live_secret_key,
+  stripe_test_secret_key,
+  stripe_live_webhook_secret,
+  stripe_test_webhook_secret,
+  resend_api_key
+FROM settings
+LIMIT 1;
+
+Copy
+sql
+How to read the result:
+
+If it returns 0 rows → RLS is blocking the anon role. ✅
+
+If it returns a row with null values → RLS allows the row but columns are null (check if values are actually stored).
+
+If it returns a row with actual key values → RLS is not protecting these columns. 🔴 Rotate credentials immediately.
+
+You can also run a broader check to see exactly what the anon role can read from settings:
+
+SET LOCAL ROLE anon;
+
+SELECT * FROM settings LIMIT 1;
+
+Copy
+sql
+If that returns any row at all, the anon role has read access to the entire settings table — including every secret column.
+
+One important note: Supabase SQL Editor runs as postgres (superuser) by default. The SET LOCAL ROLE anon switches to the anon role only for that transaction, which accurately simulates what your app's anon key can read.
+
+After running, also check the settings_public view to confirm it excludes secret columns:
+
+SET LOCAL ROLE anon;
+
+SELECT * FROM settings_public LIMIT 1;
+
+Copy
+sql
+That result should contain store settings but no Stripe keys, no Resend key, no webhook secrets. If it does contain them, the view definition needs to be fixed.

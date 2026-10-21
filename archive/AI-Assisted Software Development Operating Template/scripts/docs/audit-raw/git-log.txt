@@ -1,0 +1,50 @@
+3f56466b baseline: pre-governance snapshot
+0fc09d8c fix(auth): switch from admin link generation to signInWithOtp
+70fbbf3d refactor(checkout): restructure form layout and component hierarchy
+6be0020a style(ui): update placeholder for facebook domain verification input
+f8bfdf4f feat(seo): add facebook domain verification support
+872e7157 feat(checkout): add order cancellation page
+f6e91443 fix(admin): add autocomplete attribute to Stripe secret inputs
+ec7bc5e4 ci(deploy): automate Stripe secret synchronization to edge functions
+c6f4fbc8 feat(marketing): implement GA4 tracking, attribution, and marketing consent
+cb2797ea refactor(admin): extend shipment type definition to include carrier
+30503514 feat(orders): support multiple shipments per order
+8e2ae901 refactor(account): clean up dashboard and refine order status logic
+873aa1ca fix(account): filter out pending orders and improve status display
+2f1bd93a style(ui): simplify printify timestamp labels
+6fe3d9ec fix(admin): resolve discount code retrieval issues in Stripe dashboard
+0a64a02c feat(orders): implement discount tracking and Printify shipment integration
+ef7dac11 refactor(marketing): improve Facebook Pixel initialization check
+b3e43e5d fix(marketing): correct Facebook Pixel event values and add Meta CAPI support
+98a9ba6d fix(config): expand CSP directives for facebook and cloud hosting
+00c07bdf docs(setup): add Facebook Pixel documentation and configuration guides
+9be0062d feat(marketing): add Facebook Pixel tracking and Printful support
+a8da4600 feat(seo): implement Facebook Pixel integration and Printful support
+b3dc36e5 feat(ui): implement auto-playing carousel with hover pause and product links
+fc4431d4 refactor(admin): improve product image handling in modal
+811621d2 security(auth): harden authentication flow and implement rate limiting
+d45648ae fix(infra): prevent production OOM errors and optimize resource usage
+f06e4632 feat(admin): enhance dashboard metrics and stripe reporting
+2f241bda fix(admin): improve order management and webhook reliability
+00e2898f fix: git stash before pull in deploy script
+22c6ce88 fix(api): improve webhook handling and stripe checkout metadata
+7f4756fe fix: keep mailerlite group IDs as strings to avoid float64 precision loss
+c3e53aa2 push
+a1cf4d91 feat(storefront): add multimedia support for music and video
+e44ac484 feat(admin): implement analytics dashboard and order tracking
+dbd8276b feat(admin): enhance customer management tools
+42099599 feat(api): automate refund confirmation emails via Resend
+12d3e6d4 docs(resend): add setup documentation and improve email admin UI
+f5f43e17 feat(stripe-checkout): enable promotion codes in checkout session
+41f9ffde refactor(ui): optimize logo loading and add shipping rate visibility
+278462d6 feat(checkout): implement live Printify shipping cost calculation
+c86e026d push
+42e838b7 psh
+54054802 push
+fa0c119c feat(workspace): add workspace configuration for project structure
+761e54d5 feat(affiliates): implement dynamic referral link generation and management
+d7359b0f refactor(mailerlite): improve subscriber update logic and ui feedback
+a5382ea6 feat(admin): implement administrative user management and security hardening
+87dc1236 push
+6424e69d push
+f5b27e6b -secondary

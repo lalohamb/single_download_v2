@@ -1,0 +1,15 @@
+[functions.printify-proxy]
+verify_jwt = true
+entrypoint = "./functions/printify-proxy/index.ts"
+
+[functions.printify-webhook]
+verify_jwt = false
+entrypoint = "./functions/printify-webhook/index.ts"
+
+[functions.stripe-checkout]
+verify_jwt = false
+entrypoint = "./functions/stripe-checkout/index.ts"
+
+[functions.stripe-webhook]
+verify_jwt = false
+entrypoint = "./functions/stripe-webhook/index.ts"
