@@ -15,7 +15,7 @@ async function getAuthedSb(req: NextRequest) {
   if (!token) return null;
   const { data: { user } } = await sb().auth.getUser(token);
   if (!user) return null;
-  const { data } = await sb().from("admins").select("id").eq("id", user.id).maybeSingle();
+  const { data } = await sb().from("admins").select("id").eq("auth_user_id", user.id).maybeSingle();
   if (!data) return null;
   return sb();
 }

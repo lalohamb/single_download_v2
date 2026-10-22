@@ -178,7 +178,10 @@ Deno.serve(async (req: Request) => {
     }
 
     // Determine origin for success/cancel URLs
-    const origin = body.origin || req.headers.get("origin") || "http://localhost:5173";
+    // Never trust the client for redirect targets: only SITE_URL, or localhost in dev
+    const requested = String(body.origin || req.headers.get("origin") || "");
+    const isLocalOrigin = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(requested);
+    const origin = (Deno.env.get("SITE_URL") || "").replace(/\/$/, "") || (isLocalOrigin ? requested : "http://localhost:3000");
 
     // ── Server-side price lookup ──────────────────────────────────────────────
     // Never trust client-supplied prices. Fetch authoritative price/variant data

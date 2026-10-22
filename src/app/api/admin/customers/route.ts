@@ -50,7 +50,7 @@ export async function GET() {
     const [profilesResult, { data: ordersData, error: ordersError }, { data: adminsData, error: adminsError }] = await Promise.all([
       sb.from("customer_profiles").select("*").order("created_at", { ascending: false }),
       sb.from("orders").select("email,total,status,created_at").order("created_at", { ascending: false }),
-      sb.from("admins").select("id"),
+      sb.from("admins").select("auth_user_id"),
     ]);
 
     const usersData = { users: allUsers };
@@ -60,7 +60,7 @@ export async function GET() {
     const profilesError = profilesResult.error;
     const profiles = profilesError ? [] : ((profilesResult.data || []) as CustomerProfileRow[]);
     const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
-    const adminIds = new Set((adminsData || []).map((admin) => admin.id));
+    const adminIds = new Set((adminsData || []).map((admin) => admin.auth_user_id));
     const statsByEmail = new Map<string, OrderStats>();
     const paidStatuses = new Set(["paid", "fulfilled", "shipped", "delivered"]);
 
@@ -119,6 +119,10 @@ export async function DELETE(req: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
+
+  // Admin accounts are managed via /api/admin/manage, never deleted from here
+  const { data: targetAdmin } = await sb.from("admins").select("id").eq("auth_user_id", id).maybeSingle();
+  if (targetAdmin) return NextResponse.json({ error: "Cannot delete an admin account" }, { status: 403 });
 
   const { error } = await sb.auth.admin.deleteUser(id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

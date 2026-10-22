@@ -56,6 +56,11 @@ export async function POST(req: NextRequest) {
   }
   if (Object.keys(patch).length === 0)
     return NextResponse.json({ error: "No valid fields provided" }, { status: 400 });
+  // These IDs are rendered inside inline <script> tags, so only accept their real formats
+  if (patch.facebook_pixel_id && !/^\d{5,20}$/.test(String(patch.facebook_pixel_id)))
+    return NextResponse.json({ error: "Facebook Pixel ID must be digits only" }, { status: 400 });
+  if (patch.ga_measurement_id && !/^G-[A-Z0-9]{4,15}$/.test(String(patch.ga_measurement_id)))
+    return NextResponse.json({ error: "GA Measurement ID must look like G-XXXXXXXXXX" }, { status: 400 });
   // Fetch the existing row id (whatever it is) and update it, or insert if none exists
   const { data: existing } = await sb.from("seo_settings").select("id").limit(1).maybeSingle();
   const { error } = existing

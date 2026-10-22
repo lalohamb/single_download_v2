@@ -28,8 +28,14 @@ function sb() {
   });
 }
 
+// The cookie goes back to whoever requested the code, so it must never contain
+// the code itself — only an HMAC of it that the confirm route can recompute.
+function hashOtp(affiliateId: string, otp: string, expiry: number, secret: string): string {
+  return createHmac("sha256", secret).update(`otp.${affiliateId}.${otp}.${expiry}`).digest("hex");
+}
+
 function signOtpCookie(affiliateId: string, otp: string, expiry: number, secret: string): string {
-  const payload = `${affiliateId}.${otp}.${expiry}`;
+  const payload = `${affiliateId}.${hashOtp(affiliateId, otp, expiry, secret)}.${expiry}`;
   const sig = createHmac("sha256", secret).update(payload).digest("hex");
   return `${payload}.${sig}`;
 }

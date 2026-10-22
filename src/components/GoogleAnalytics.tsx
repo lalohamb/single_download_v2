@@ -12,7 +12,8 @@ export default function GoogleAnalytics({ measurementId }: { measurementId: stri
     trackPageView(pathname, measurementId);
   }, [pathname, measurementId]);
 
-  if (!measurementId) return null;
+  // Interpolated into an inline script — refuse anything that isn't a real GA4 ID
+  if (!measurementId || !/^G-[A-Z0-9]{4,15}$/.test(measurementId)) return null;
 
   return (
     <>

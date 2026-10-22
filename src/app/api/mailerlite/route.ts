@@ -200,18 +200,30 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const { action } = body;
 
-  if (action !== "add_subscriber") {
-    const authError = await requireAdmin();
-    if (authError) return authError;
-  }
+  // add_subscriber is public (newsletter forms); everything else is admin-only
+  const authError = await requireAdmin();
+  if (action !== "add_subscriber" && authError) return authError;
+  const isAdmin = !authError;
 
   try {
     if (action === "add_subscriber") {
-      const payload: Record<string, unknown> = { email: body.email };
-      if (body.name) payload.fields = { name: body.name };
-      if (body.groups?.length) payload.groups = body.groups.map((id: string) => String(id));
+      const email = typeof body.email === "string" ? body.email.trim() : "";
+      if (!/^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/.test(email)) {
+        return NextResponse.json({ error: "Please enter a valid email address." }, { status: 400 });
+      }
+      const groups = Array.isArray(body.groups) ? body.groups.map((id: unknown) => String(id)) : [];
+      if (groups.some((id: string) => !/^\d{1,30}$/.test(id))) {
+        return NextResponse.json({ error: "Invalid group." }, { status: 400 });
+      }
+      const payload: Record<string, unknown> = { email };
+      // MailerLite upserts by email, so only admins may set fields on an existing subscriber
+      if (isAdmin && body.name) payload.fields = { name: String(body.name) };
+      if (groups.length) payload.groups = isAdmin ? groups : groups.slice(0, 1);
       const { json, status } = await ml("/subscribers", { method: "POST", body: JSON.stringify(payload) });
-      return NextResponse.json(json, { status });
+      if (isAdmin) return NextResponse.json(json, { status });
+      // Public callers never see MailerLite's subscriber record
+      if (status >= 400) return NextResponse.json({ error: "Could not subscribe. Please try again." }, { status: 400 });
+      return NextResponse.json({ ok: true });
     }
 
     if (action === "update_subscriber") {

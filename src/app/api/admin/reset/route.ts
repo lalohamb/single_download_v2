@@ -19,7 +19,7 @@ async function deleteAll(sb: ReturnType<typeof serviceSupabase>, table: string) 
 }
 
 export async function POST(req: NextRequest) {
-  const authError = await requireAdmin();
+  const authError = await requireAdmin({ superAdmin: true });
   if (authError) return authError;
 
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {

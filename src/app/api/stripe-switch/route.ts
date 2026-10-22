@@ -65,11 +65,21 @@ export async function POST(req: NextRequest) {
   if (!secretKey)
     return NextResponse.json({ error: `No ${mode} keys saved. Save keys first.` }, { status: 400 });
 
+  // Always update the active mode in DB first — critical step
   try {
-    await pushSecretsToSupabase(secretKey, webhookSecret ?? "");
     await setStripeMode(mode);
-    return NextResponse.json({ ok: true, mode });
   } catch (e: unknown) {
     return NextResponse.json({ error: getErrorMessage(e) }, { status: 500 });
   }
+
+  // Best-effort: push secrets to Supabase Edge Functions (non-fatal if 403/missing token)
+  let secretsWarning: string | null = null;
+  try {
+    await pushSecretsToSupabase(secretKey, webhookSecret ?? "");
+  } catch (e: unknown) {
+    secretsWarning = getErrorMessage(e);
+    console.warn("Supabase secrets push failed (non-fatal):", secretsWarning);
+  }
+
+  return NextResponse.json({ ok: true, mode, ...(secretsWarning ? { warning: secretsWarning } : {}) });
 }

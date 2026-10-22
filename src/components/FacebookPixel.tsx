@@ -28,7 +28,8 @@ export default function FacebookPixel({ pixelId }: { pixelId: string }) {
     fbq("track", "PageView");
   }, [pathname]);
 
-  if (!pixelId) return null;
+  // Interpolated into an inline script — refuse anything that isn't a numeric pixel ID
+  if (!pixelId || !/^\d{5,20}$/.test(pixelId)) return null;
 
   return (
     <>

@@ -10,7 +10,7 @@ import { NextResponse } from "next/server";
  * Returns null when the caller is a valid admin.
  * Returns a 401 NextResponse when the caller is not authenticated or not an admin.
  */
-export async function requireAdmin(): Promise<NextResponse | null> {
+export async function requireAdmin(opts: { superAdmin?: boolean } = {}): Promise<NextResponse | null> {
   const cookieStore = await cookies();
   const headersList = await headers();
 
@@ -56,8 +56,11 @@ export async function requireAdmin(): Promise<NextResponse | null> {
   const { data: { user }, error } = await sb.auth.getUser(token);
   if (error || !user) return unauthorized();
 
-  const { data } = await sb.from("admins").select("id").eq("auth_user_id", user.id).maybeSingle();
+  const { data } = await sb.from("admins").select("id, role").eq("auth_user_id", user.id).maybeSingle();
   if (!data) return unauthorized();
+  if (opts.superAdmin && data.role !== "super_admin") {
+    return NextResponse.json({ error: "Super admin only" }, { status: 403 });
+  }
 
   return null;
 }
