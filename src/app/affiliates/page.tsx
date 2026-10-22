@@ -1,16 +1,17 @@
+import type { Metadata } from "next";
 import Link from "next/link";
-import { createClient } from "@supabase/supabase-js";
 import { notFound } from "next/navigation";
 import StorefrontLayout from "@/components/StorefrontLayout";
+import { isAffiliateProgramEnabled } from "@/lib/affiliate-program";
 
-async function isProgramEnabled() {
-  const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { autoRefreshToken: false, persistSession: false } });
-  const { data } = await sb.from("settings_public").select("affiliate_program_enabled").limit(1).maybeSingle();
-  return data?.affiliate_program_enabled !== false;
-}
+export const metadata: Metadata = {
+  title: "Affiliate Program",
+  description: "Earn a 10% commission on every Body & Sleeves sale you refer. Share your link, we track sales for 30 days, and payouts are sent monthly.",
+  alternates: { canonical: "/affiliates" },
+};
 
 export default async function AffiliatesPage() {
-  if (!(await isProgramEnabled())) notFound();
+  if (!(await isAffiliateProgramEnabled())) notFound();
 
   return (
     <StorefrontLayout>

@@ -9,6 +9,7 @@ import PromoBanner from "@/components/PromoBanner";
 import AppImage from "@/components/AppImage";
 import { formatPrice } from "@/lib/supabase";
 import { resolveStorageUrl } from "@/lib/storage";
+import { categoryHref } from "@/lib/seo";
 import { DEFAULT_AFFIRMATIONS_SETTINGS, type AffirmationsSettings } from "@/lib/affirmations-settings";
 import { DEFAULT_FEATURE_STRIP_SETTINGS, type FeatureStripSettings } from "@/lib/feature-strip-settings";
 import { DEFAULT_NEW_ARRIVALS_SETTINGS, type NewArrivalsSettings } from "@/lib/new-arrivals-settings";
@@ -110,7 +111,7 @@ export default function HomeClient({ settings, featured, newArrivals, trending, 
         <Reveal>
           <div className="flex overflow-x-auto scrollbar-hide gap-1">
             {categories.map((cat) => (
-              <Link key={cat.id} href={`/shop?category=${cat.slug}`} className="group relative flex-1 min-w-[140px] aspect-square overflow-hidden bg-secondary-900 hover:shadow-xl hover:shadow-gold-500/10 transition-all">
+              <Link key={cat.id} href={categoryHref(cat.slug)} className="group relative flex-1 min-w-[140px] aspect-square overflow-hidden bg-secondary-900 hover:shadow-xl hover:shadow-gold-500/10 transition-all">
                 {(cat.category_image_url || categoryImages[cat.id]) && (
                   <AppImage fill src={cat.category_image_url || categoryImages[cat.id]} alt={cat.name} className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500" />
                 )}

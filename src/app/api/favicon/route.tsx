@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
+import { ImageResponse } from "next/og";
 import { createClient } from "@supabase/supabase-js";
 
-export const dynamic = "force-dynamic";
+// Cached and regenerated hourly (same lifetime as the previous browser cache)
+// instead of re-proxying the full upload on every request.
+export const revalidate = 3600;
+
+// Google wants a square favicon at a multiple of 48px (M2 SEO-003 / SEO-013).
+const SIZE = 96;
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -50,7 +56,28 @@ export async function GET() {
     return new NextResponse(null, { status: 404 });
   }
 
-  return new NextResponse(upstream.body, {
+  const original = await upstream.arrayBuffer();
+
+  // Uploaded favicons can be multi-megabyte photos; serve PNG/JPEG resized.
+  // Formats the renderer can't read (SVG, ICO, WebP) are passed through as-is.
+  if (/^image\/(png|jpe?g)$/.test(contentType)) {
+    try {
+      const dataUrl = `data:${contentType};base64,${Buffer.from(original).toString("base64")}`;
+      const resized = await new ImageResponse(
+        // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
+        <img src={dataUrl} width={SIZE} height={SIZE} style={{ objectFit: "contain" }} />,
+        { width: SIZE, height: SIZE },
+      ).arrayBuffer();
+      return new NextResponse(resized, {
+        status: 200,
+        headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=3600" },
+      });
+    } catch (e) {
+      console.warn("[favicon] Resize failed, serving original:", String((e as Error)?.message ?? e));
+    }
+  }
+
+  return new NextResponse(original, {
     status: 200,
     headers: {
       "Content-Type": contentType,

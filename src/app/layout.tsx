@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import PersistentMusicPlayer from "@/components/PersistentMusicPlayer";
 import FacebookPixel from "@/components/FacebookPixel";
 import GoogleAnalytics from "@/components/GoogleAnalytics";
+import { siteUrl } from "@/lib/seo";
 
 const SUPABASE_ORIGIN = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL!).origin;
 
@@ -17,7 +18,9 @@ const supabase = createClient(
         const target = new URL(url.toString());
         if (target.origin !== SUPABASE_ORIGIN)
           throw new Error(`Blocked SSRF attempt to ${target.origin}`);
-        return fetch(url, { ...opts, cache: "no-store" });
+        // Revalidate rather than no-store: a no-store fetch here made every page
+        // dynamic and disabled ISR site-wide (M2 SEO-013).
+        return fetch(url, { ...opts, next: { revalidate: 60 } });
       },
     },
   }
@@ -30,9 +33,8 @@ export async function generateMetadata(): Promise<Metadata> {
   ]);
   const storeName = settings?.store_name || "Body & Sleeves";
   const suffix = seo?.meta_title_suffix || `| ${storeName}`;
-  const siteUrl = seo?.site_url || "https://bodyandsleeves.com";
   return {
-    metadataBase: new URL(siteUrl),
+    metadataBase: new URL(siteUrl(seo?.site_url)),
     title: { default: storeName, template: `%s ${suffix}` },
     description: "Made-to-order apparel designed for every body, every style, and every day.",
     openGraph: { siteName: storeName, type: "website" },

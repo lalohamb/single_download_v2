@@ -92,7 +92,7 @@ export default async function Footer() {
   // fully dynamic, defeating ISR on homepage/shop. Footer data (store name,
   // social links) rarely changes; revalidation via /api/revalidate is sufficient.
   const supabase = getSupabase();
-  const { data } = await supabase.from("settings_public").select("store_name, social_links, logo_url, logo_size, footer_logo_url, footer_logo_size, footer_text, footer_bottom_message").limit(1).maybeSingle();
+  const { data } = await supabase.from("settings_public").select("store_name, social_links, logo_url, logo_size, footer_logo_url, footer_logo_size, footer_text, footer_bottom_message, affiliate_program_enabled").limit(1).maybeSingle();
   const social: StoreSettings["social_links"] = data?.social_links ?? DEFAULT_SOCIAL;
   const logoUrl = resolveStorageUrl(data?.footer_logo_url || data?.logo_url) || "/store-logo-placeholder.svg";
   const logoSize = data?.footer_logo_size ?? data?.logo_size ?? 40;
@@ -130,9 +130,9 @@ export default async function Footer() {
             <h4 className="text-white font-semibold mb-4">Shop</h4>
             <ul className="space-y-3">
               <li><Link href="/shop" className="hover:text-white transition-colors">All Products</Link></li>
-              <li><Link href="/shop?category=t-shirts" className="hover:text-white transition-colors">T-Shirts</Link></li>
-              <li><Link href="/shop?category=hoodies" className="hover:text-white transition-colors">Hoodies</Link></li>
-              <li><Link href="/shop?category=hats" className="hover:text-white transition-colors">Hats</Link></li>
+              <li><Link href="/shop/t-shirts" className="hover:text-white transition-colors">T-Shirts</Link></li>
+              <li><Link href="/shop/hoodies" className="hover:text-white transition-colors">Hoodies</Link></li>
+              <li><Link href="/shop/hats" className="hover:text-white transition-colors">Hats</Link></li>
             </ul>
           </div>
           <div>
@@ -160,7 +160,9 @@ export default async function Footer() {
               <li><Link href="/services#custom" className="hover:text-white transition-colors">Custom Orders</Link></li>
               <li><Link href="/services#bulk" className="hover:text-white transition-colors">Bulk &amp; Wholesale</Link></li>
               <li><Link href="/services#gifting" className="hover:text-white transition-colors">Gift Services</Link></li>
-              <li><Link href="/affiliates" className="hover:text-white transition-colors">Affiliate Program</Link></li>
+              {data?.affiliate_program_enabled !== false && (
+                <li><Link href="/affiliates" className="hover:text-white transition-colors">Affiliate Program</Link></li>
+              )}
             </ul>
           </div>
         </div>

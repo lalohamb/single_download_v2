@@ -7,6 +7,7 @@
     "build": "next build",
     "audit:schema": "node scripts/audit-production-schema.js",
     "test:schema": "node scripts/test-schema-consistency.js",
+    "test:seo": "node scripts/seo-smoke.mjs",
     "test:e2e": "playwright test",
     "start": "next start",
     "lint": "next lint",

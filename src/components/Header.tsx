@@ -12,6 +12,7 @@ import { DEFAULT_SITE_MENU_SETTINGS, type SiteMenuSettings } from "@/lib/site-me
 import AppImage from "@/components/AppImage";
 import PersistentMusicPlayer from "@/components/PersistentMusicPlayer";
 import PersistentVideoPlayer from "@/components/PersistentVideoPlayer";
+import { categoryHref } from "@/lib/seo";
 
 export default function Header({ initialLogo }: { initialLogo?: { url: string | null; size: number } }) {
   const { itemCount, toggleCart } = useCart();
@@ -90,7 +91,7 @@ export default function Header({ initialLogo }: { initialLogo?: { url: string | 
               <nav className="hidden lg:flex items-center gap-8" style={menuTypography}>
               <Link href="/shop" className="transition-colors" style={{ color: menuSettings.textColor }}>All Products</Link>
               {menuCategories.slice(0, 5).map((cat) => (
-                <Link key={cat.id} href={`/shop?category=${cat.slug}`} className="transition-colors" style={{ color: menuSettings.textColor }}>{cat.name}</Link>
+                <Link key={cat.id} href={categoryHref(cat.slug)} className="transition-colors" style={{ color: menuSettings.textColor }}>{cat.name}</Link>
               ))}
               <Link href="/about" className="transition-colors" style={{ color: menuSettings.textColor }}>About</Link>
               <PersistentMusicPlayer />
@@ -128,7 +129,7 @@ export default function Header({ initialLogo }: { initialLogo?: { url: string | 
             <nav className="flex flex-col gap-4" style={menuTypography}>
               <Link href="/shop" onClick={() => setMobileOpen(false)} className="py-2" style={{ color: menuSettings.textColor }}>All Products</Link>
               {menuCategories.map((cat) => (
-                <Link key={cat.id} href={`/shop?category=${cat.slug}`} onClick={() => setMobileOpen(false)} className="py-2" style={{ color: menuSettings.textColor }}>{cat.name}</Link>
+                <Link key={cat.id} href={categoryHref(cat.slug)} onClick={() => setMobileOpen(false)} className="py-2" style={{ color: menuSettings.textColor }}>{cat.name}</Link>
               ))}
               <Link href="/about" onClick={() => setMobileOpen(false)} className="py-2" style={{ color: menuSettings.textColor }}>About</Link>
               <Link href="/account" onClick={() => setMobileOpen(false)} className="py-2" style={{ color: menuSettings.textColor }}>{user ? "My Account" : "Account"}</Link>

@@ -21,3 +21,11 @@ export const PRODUCT_FLAGS: FlagDef[] = [
 
 // Flags currently shown in admin + storefront. Flip `enabled` above to add one.
 export const ACTIVE_FLAGS: FlagDef[] = PRODUCT_FLAGS.filter((f) => f.enabled);
+
+// Columns needed to render ProductCard and the shop filters. Listing pages
+// select only these instead of "*" so variant/shipping JSON isn't serialized
+// into every page (M2 SEO-013).
+export const PRODUCT_CARD_COLUMNS = [
+  "id", "title", "description", "image_url", "price", "category_id", "status", "created_at", "updated_at",
+  ...PRODUCT_FLAGS.map((f) => f.key as string),
+].join(", ");

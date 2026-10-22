@@ -1,31 +1,28 @@
 "use client";
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { SlidersHorizontal, X } from "lucide-react";
 import type { Product, Category } from "@/types";
 import ProductCard from "@/components/ProductCard";
 import { trackSearch } from "@/lib/analytics";
+import { categoryHref } from "@/lib/seo";
 
-export default function ShopClient({ products, categories }: { products: Product[]; categories: Category[] }) {
+// Category is part of the path (/shop/{slug}) so each category is its own
+// indexable landing page (M2 SEO-010). The server passes the active category.
+export default function ShopClient({ products, categories, activeCategory = null }: { products: Product[]; categories: Category[]; activeCategory?: Category | null }) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [showFilters, setShowFilters] = useState(false);
   const [sortBy, setSortBy] = useState("featured");
   const [flagFilter, setFlagFilter] = useState<"" | "is_new_arrival" | "is_trending">("");
-  const activeCategory = searchParams.get("category") || "";
   const searchQuery = searchParams.get("q") || "";
-
-  const setCategory = (slug: string) => {
-    router.push(slug ? `/shop?category=${slug}` : "/shop");
-  };
+  const basePath = activeCategory ? categoryHref(activeCategory.slug) : "/shop";
 
   const filtered = useMemo(() => {
     if (searchQuery) trackSearch(searchQuery);
     let list = [...products];
-    if (activeCategory) {
-      const cat = categories.find((c) => c.slug === activeCategory);
-      if (cat) list = list.filter((p) => p.category_id === cat.id);
-    }
+    if (activeCategory) list = list.filter((p) => p.category_id === activeCategory.id);
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       list = list.filter((p) => p.title.toLowerCase().includes(q) || (p.description || "").toLowerCase().includes(q));
@@ -38,14 +35,14 @@ export default function ShopClient({ products, categories }: { products: Product
     else if (sortBy === "trending") list.sort((a, b) => (b.is_trending ? 1 : 0) - (a.is_trending ? 1 : 0));
     else list.sort((a, b) => (b.featured ? 1 : 0) - (a.featured ? 1 : 0));
     return list;
-  }, [products, categories, activeCategory, sortBy, flagFilter, searchQuery]);
+  }, [products, activeCategory, sortBy, flagFilter, searchQuery]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-12">
-      {/* <div className="mb-8">
-        <h1 className="text-3xl lg:text-4xl font-bold text-secondary-900">{activeCatName}</h1>
-        <p className="text-secondary-500 mt-2">{filtered.length} {filtered.length === 1 ? "product" : "products"}</p>
-      </div> */}
+      <div className="mb-8">
+        <h1 className="text-3xl lg:text-4xl font-bold text-secondary-900">{activeCategory ? activeCategory.name.trim() : "All Products"}</h1>
+        {activeCategory?.description && <p className="text-secondary-500 mt-2">{activeCategory.description}</p>}
+      </div>
       <div className="flex flex-col lg:flex-row gap-8">
         <aside className="lg:w-64 flex-shrink-0">
           <button onClick={() => setShowFilters(!showFilters)} className="lg:hidden flex items-center gap-2 mb-4 px-4 py-2 border border-secondary-200 rounded-lg w-full justify-center">
@@ -57,9 +54,9 @@ export default function ShopClient({ products, categories }: { products: Product
               <button onClick={() => setShowFilters(false)} className="lg:hidden p-1"><X size={18} /></button>
             </div>
             <div className="space-y-1">
-              <button onClick={() => setCategory("")} className={`block w-full text-left px-3 py-2 rounded-lg transition-colors ${!activeCategory ? "bg-secondary-900 text-white font-medium" : "text-secondary-700 hover:bg-secondary-50"}`}>All Products</button>
+              <Link href="/shop" onClick={() => setShowFilters(false)} className={`block w-full text-left px-3 py-2 rounded-lg transition-colors ${!activeCategory ? "bg-secondary-900 text-white font-medium" : "text-secondary-700 hover:bg-secondary-50"}`}>All Products</Link>
               {categories.map((cat) => (
-                <button key={cat.id} onClick={() => setCategory(cat.slug)} className={`block w-full text-left px-3 py-2 rounded-lg transition-colors ${activeCategory === cat.slug ? "bg-secondary-900 text-white font-medium" : "text-secondary-700 hover:bg-secondary-50"}`}>{cat.name}</button>
+                <Link key={cat.id} href={categoryHref(cat.slug)} onClick={() => setShowFilters(false)} className={`block w-full text-left px-3 py-2 rounded-lg transition-colors ${activeCategory?.id === cat.id ? "bg-secondary-900 text-white font-medium" : "text-secondary-700 hover:bg-secondary-50"}`}>{cat.name}</Link>
               ))}
             </div>
             <h2 className="font-semibold text-secondary-900 mt-6 mb-4">Collections</h2>
@@ -76,7 +73,7 @@ export default function ShopClient({ products, categories }: { products: Product
               {searchQuery && (
                 <div className="flex items-center gap-1.5 bg-secondary-100 text-secondary-700 text-sm px-3 py-1 rounded-full">
                   <span>Search: <strong>{searchQuery}</strong></span>
-                  <button onClick={() => router.push(activeCategory ? `/shop?category=${activeCategory}` : "/shop")} className="ml-1 hover:text-secondary-900"><X size={14} /></button>
+                  <button onClick={() => router.push(basePath)} className="ml-1 hover:text-secondary-900"><X size={14} /></button>
                 </div>
               )}
               <label className="text-sm text-secondary-600">Sort by:</label>

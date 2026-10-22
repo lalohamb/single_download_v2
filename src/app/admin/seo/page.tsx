@@ -23,7 +23,7 @@ interface SeoSettings {
 
 type StatusType = "idle" | "saving" | "saved" | "error";
 
-function Toggle({ checked, onChange, label, description }: { checked: boolean; onChange: (v: boolean) => void; label: string; description: string }) {
+function Toggle({ checked, onChange, label, description, offWarning }: { checked: boolean; onChange: (v: boolean) => void; label: string; description: string; offWarning?: string }) {
   return (
     <label className="flex items-start gap-4 cursor-pointer group">
       <div className="relative mt-0.5 flex-shrink-0">
@@ -34,6 +34,7 @@ function Toggle({ checked, onChange, label, description }: { checked: boolean; o
       <div>
         <p className="font-medium text-secondary-900 text-sm">{label}</p>
         <p className="text-xs text-secondary-500 mt-0.5">{description}</p>
+        {!checked && offWarning && <p className="text-xs text-error-600 mt-1">⚠ {offWarning}</p>}
       </div>
     </label>
   );
@@ -233,6 +234,7 @@ function SeoPanel() {
             checked={form.sitemap_enabled}
             onChange={(v) => set("sitemap_enabled", v)}
             label="Sitemap XML"
+            offWarning="Turning this off publishes an empty sitemap. Google stops discovering new and updated products through it."
             description="Generates /sitemap.xml with all active product pages, shop, home, about, and policy pages. Submit to Google Search Console."
           />
           <Toggle
@@ -245,12 +247,14 @@ function SeoPanel() {
             checked={form.jsonld_enabled}
             onChange={(v) => set("jsonld_enabled", v)}
             label="JSON-LD Product Schema"
+            offWarning="Products lose eligibility for price and availability rich results in Google."
             description="Adds structured data to every product page so Google can show price, availability, and brand in search results (rich snippets)."
           />
           <Toggle
             checked={form.canonical_enabled}
             onChange={(v) => set("canonical_enabled", v)}
             label="Canonical URLs"
+            offWarning="Product pages lose their canonical tag, so URL variations (tracking parameters, www) can be indexed as duplicates."
             description="Adds a canonical <link> tag to product pages to prevent duplicate content penalties from URL variations."
           />
         </div>

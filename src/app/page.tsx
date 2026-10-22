@@ -3,6 +3,9 @@ import { createClient } from "@supabase/supabase-js";
 import StorefrontLayout from "@/components/StorefrontLayout";
 import HomeClient from "./HomeClient";
 import type { Category, Product, StoreSettings } from "@/types";
+import { PRODUCT_CARD_COLUMNS } from "@/lib/productFlags";
+import { siteUrl, jsonLdString } from "@/lib/seo";
+import { resolveStorageUrl } from "@/lib/storage";
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
 
@@ -111,6 +114,34 @@ const TEMPLATE_PRODUCTS: Product[] = [
 // Use /api/revalidate after admin saves to push changes immediately.
 export const revalidate = 60;
 
+function buildSiteJsonLd(settings: StoreSettings, base: string) {
+  const name = settings.store_name?.trim() || "Body & Sleeves";
+  const logo = resolveStorageUrl(settings.logo_url);
+  const sameAs = Object.entries(settings.social_links ?? {})
+    .filter(([key, entry]) => key !== "email" && entry?.enabled && /^https?:\/\//.test(entry.url) && !/yourstore/i.test(entry.url))
+    .map(([, entry]) => entry.url);
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": `${base}/#organization`,
+        name,
+        url: base,
+        ...(logo && { logo: logo.startsWith("/") ? `${base}${logo}` : logo }),
+        ...(sameAs.length > 0 && { sameAs }),
+      },
+      {
+        "@type": "WebSite",
+        "@id": `${base}/#website`,
+        name,
+        url: base,
+        publisher: { "@id": `${base}/#organization` },
+      },
+    ],
+  };
+}
+
 export async function generateMetadata(): Promise<Metadata> {
   const [{ data: seo }, { data: settings }] = await Promise.all([
     supabase.from("seo_settings").select("default_og_image, site_url").limit(1).maybeSingle(),
@@ -127,20 +158,31 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function HomePage() {
-  const [settingsRes, featuredRes, newArrivalsRes, trendingRes, categoriesRes, catImgRes] = await Promise.all([
+  const [settingsRes, featuredRes, newArrivalsRes, trendingRes, categoriesRes, catImgRes, seoRes] = await Promise.all([
     supabase.from("settings_public").select("*").limit(1).maybeSingle(),
-    supabase.from("products").select("*").eq("status", "active").eq("featured", true).limit(8),
-    supabase.from("products").select("*").eq("status", "active").eq("is_new_arrival", true).order("created_at", { ascending: false }).limit(12),
-    supabase.from("products").select("*").eq("status", "active").eq("is_trending", true).limit(12),
+    supabase.from("products").select(PRODUCT_CARD_COLUMNS).eq("status", "active").eq("featured", true).limit(8),
+    supabase.from("products").select(PRODUCT_CARD_COLUMNS).eq("status", "active").eq("is_new_arrival", true).order("created_at", { ascending: false }).limit(12),
+    supabase.from("products").select(PRODUCT_CARD_COLUMNS).eq("status", "active").eq("is_trending", true).limit(12),
     supabase.from("categories").select("*").order("name"),
     supabase.from("products").select("category_id, image_url").eq("status", "active").not("image_url", "is", null).not("category_id", "is", null).limit(500),
+    supabase.from("seo_settings").select("site_url").limit(1).maybeSingle(),
   ]);
+
+  // Template content is for a fresh install with no data. A database error must
+  // surface as a 5xx, not a 200 page of placeholder products (M2 SEO-007).
+  const failed = [settingsRes, featuredRes, newArrivalsRes, trendingRes, categoriesRes, catImgRes, seoRes].find((r) => r.error);
+  if (failed?.error) throw new Error(`Home page data failed to load: ${failed.error.message}`);
 
   const settings = settingsRes.data ?? TEMPLATE_SETTINGS;
   const categories = categoriesRes.data?.length ? categoriesRes.data : TEMPLATE_CATEGORIES;
-  const featured = featuredRes.data?.length ? featuredRes.data : TEMPLATE_PRODUCTS.filter((p) => p.featured).slice(0, 4);
-  const newArrivals = newArrivalsRes.data?.length ? newArrivalsRes.data : TEMPLATE_PRODUCTS.filter((p) => p.is_new_arrival).slice(0, 4);
-  const trending = trendingRes.data?.length ? trendingRes.data : TEMPLATE_PRODUCTS.filter((p) => p.is_trending).slice(0, 4);
+  // Card-column rows: enough for ProductCard, which is all these sections render.
+  const asProducts = (rows: unknown) => rows as Product[] | null;
+  const featuredRows = asProducts(featuredRes.data);
+  const newArrivalRows = asProducts(newArrivalsRes.data);
+  const trendingRows = asProducts(trendingRes.data);
+  const featured = featuredRows?.length ? featuredRows : TEMPLATE_PRODUCTS.filter((p) => p.featured).slice(0, 4);
+  const newArrivals = newArrivalRows?.length ? newArrivalRows : TEMPLATE_PRODUCTS.filter((p) => p.is_new_arrival).slice(0, 4);
+  const trending = trendingRows?.length ? trendingRows : TEMPLATE_PRODUCTS.filter((p) => p.is_trending).slice(0, 4);
 
   // Representative image per category (first active product with an image).
   const categoryImages: Record<string, string> = {};
@@ -151,8 +193,14 @@ export default async function HomePage() {
     if (category.category_image_url && !categoryImages[category.id]) categoryImages[category.id] = category.category_image_url;
   }
 
+  // Site-level structured data, built only from real configured values (M2 SEO-012).
+  // Skipped on a fresh install where the template placeholders are showing.
+  const base = siteUrl(seoRes.data?.site_url);
+  const siteJsonLd = settingsRes.data ? buildSiteJsonLd(settingsRes.data as StoreSettings, base) : null;
+
   return (
     <StorefrontLayout>
+      {siteJsonLd && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdString(siteJsonLd) }} />}
       <HomeClient
         settings={settings}
         featured={featured}

@@ -53,8 +53,16 @@ const nextConfig = {
         ],
       },
       {
+        // Keep the admin area out of search results. /admin itself is not
+        // covered by the robots.txt "Disallow: /admin/" rule (M2 SEO-005).
+        source: '/admin/:path*',
+        headers: [
+          { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
+        ],
+      },
+      {
         // Extra cache-control for admin routes — never cache
-        source: '/admin/(.*)',
+        source: '/admin/:path*',
         headers: [
           { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate' },
         ],

@@ -1,6 +1,7 @@
 "use client";
 import { useMemo, useState, useEffect, useRef } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, Minus, Plus, ShoppingBag, Check, Truck, RefreshCw, Pencil, X, ZoomIn } from "lucide-react";
 import { formatPrice } from "@/lib/supabase";
@@ -26,6 +27,8 @@ export default function ProductDetailClient({ product, related, freeShippingThre
   const badges = productBadges ?? defaultBadges;
   const router = useRouter();
   const { addToCart } = useCart();
+  // Draft/archived products render as a non-purchasable "unavailable" page (M2 SEO-001).
+  const unavailable = product.status !== "active";
   const variants = useMemo(
     () => (Array.isArray(product.variants) ? product.variants : []),
     [product.variants]
@@ -71,7 +74,7 @@ export default function ProductDetailClient({ product, related, freeShippingThre
 
   const viewContentFired = useRef(false);
   useEffect(() => {
-    if (viewContentFired.current) return;
+    if (viewContentFired.current || unavailable) return;
     const fire = () => {
       if (viewContentFired.current) return;
       viewContentFired.current = true;
@@ -86,7 +89,7 @@ export default function ProductDetailClient({ product, related, freeShippingThre
       return () => clearInterval(t);
     }
     return undefined;
-  }, [product.id, product.title, product.price]);
+  }, [product.id, product.title, product.price, unavailable]);
 
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxImg, setLightboxImg] = useState("");
@@ -205,6 +208,12 @@ export default function ProductDetailClient({ product, related, freeShippingThre
               </div>
             </div>
           )}
+          {unavailable ? (
+            <div className="mt-8 rounded-lg border border-secondary-200 bg-secondary-50 p-4">
+              <p className="font-semibold text-secondary-900">This item is currently unavailable.</p>
+              <p className="text-sm text-secondary-600 mt-1">It can&apos;t be ordered right now. <Link href="/shop" className="underline hover:text-secondary-900">Browse available products</Link>.</p>
+            </div>
+          ) : (<>
           {product.is_personalizable && (
             <div className="mt-6">
               <label className="label-text flex items-center gap-1.5"><Pencil size={14} />{product.personalization_label || "Personalization"} <span className="text-error-500">*</span></label>
@@ -229,6 +238,7 @@ export default function ProductDetailClient({ product, related, freeShippingThre
               {added ? <><Check size={20} className="mr-2" />Added to Cart</> : <><ShoppingBag size={20} className="mr-2" />Add to Cart</>}
             </button>
           </div>
+          </>)}
           <div className="mt-6 space-y-3 pt-6">
             <div className="kente-bar h-0.5 w-16 rounded-full mb-4" />
             {badges.filter((b) => b.active).map((b, i) => (
