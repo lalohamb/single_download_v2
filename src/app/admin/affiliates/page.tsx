@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { ChevronDown, ChevronUp, Loader2, RefreshCw, Check, X, AlertCircle, Copy, ExternalLink } from "lucide-react";
 import ProtectedAdmin from "@/components/ProtectedAdmin";
 import { supabase } from "@/lib/supabase";
+import { fetchAdmin } from "@/lib/fetch-admin";
 
 const fmt = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
 
@@ -78,8 +79,22 @@ function AffiliatesAdmin() {
   const toggleProgram = async () => {
     setToggling(true);
     const { data: row } = await supabase.from("settings_public").select("id").limit(1).maybeSingle();
-    if (row) await supabase.from("settings").update({ affiliate_program_enabled: !programEnabled }).eq("id", row.id);
+    const { error } = row
+      ? await supabase.from("settings").update({ affiliate_program_enabled: !programEnabled }).eq("id", row.id)
+      : { error: new Error("Settings row not found") };
+    if (error) {
+      alert(`Could not update the affiliate program: ${error.message}`);
+      setToggling(false);
+      return;
+    }
     setProgramEnabled((v) => !v);
+    // Refresh cached pages now instead of after the 60s ISR window: the footer
+    // link (shared layout), the affiliate pages, and the sitemap entry.
+    await fetchAdmin("/api/revalidate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths: ["/affiliates", "/affiliates/signup", "/sitemap.xml"] }),
+    }).catch(() => {});
     setToggling(false);
   };
 
