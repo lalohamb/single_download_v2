@@ -1,53 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/require-admin";
-import { getStripeSettings, setStripeMode } from "@/lib/stripe-config";
+import { getStripeSettings, setStripeMode, pushStripeSecretsToEdge } from "@/lib/stripe-config";
 import { getErrorMessage } from "@/lib/errors";
 
 export const runtime = "nodejs";
-
-async function pushSecretsToSupabase(secretKey: string, webhookSecret: string) {
-  const projectRef = process.env.SUPABASE_PROJECT_REF;
-  const accessToken = process.env.SUPABASE_ACCESS_TOKEN;
-  if (!projectRef || !accessToken) throw new Error("SUPABASE_PROJECT_REF or SUPABASE_ACCESS_TOKEN not set");
-  if (!/^[a-z0-9]{20}$/.test(projectRef)) throw new Error("Invalid SUPABASE_PROJECT_REF format");
-
-  // Push secrets
-  const res = await fetch(
-    `https://api.supabase.com/v1/projects/${projectRef}/secrets`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify([
-        { name: "STRIPE_SECRET_KEY", value: secretKey },
-        { name: "STRIPE_WEBHOOK_SECRET", value: webhookSecret },
-      ]),
-    }
-  );
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Supabase secrets update failed: ${res.status} ${text}`);
-  }
-
-  // Redeploy edge function so it picks up the new secret immediately
-  const deployRes = await fetch(
-    `https://api.supabase.com/v1/projects/${projectRef}/functions/stripe-checkout/deploy`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ verify_jwt: false }),
-    }
-  );
-  // Non-fatal — secret is updated even if redeploy fails
-  if (!deployRes.ok) {
-    console.warn("stripe-checkout redeploy after key switch failed:", deployRes.status);
-  }
-}
 
 export async function POST(req: NextRequest) {
   const authError = await requireAdmin();
@@ -75,7 +31,7 @@ export async function POST(req: NextRequest) {
   // Best-effort: push secrets to Supabase Edge Functions (non-fatal if 403/missing token)
   let secretsWarning: string | null = null;
   try {
-    await pushSecretsToSupabase(secretKey, webhookSecret ?? "");
+    await pushStripeSecretsToEdge(secretKey, webhookSecret ?? "");
   } catch (e: unknown) {
     secretsWarning = getErrorMessage(e);
     console.warn("Supabase secrets push failed (non-fatal):", secretsWarning);

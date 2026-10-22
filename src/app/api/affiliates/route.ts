@@ -114,11 +114,19 @@ export async function POST(req: NextRequest) {
       const { data: aff } = await sb().from("affiliates").select("id, name, email, code, payout_method, payout_handle, commission_rate").eq("id", affiliate_id).maybeSingle();
       if (!aff) return NextResponse.json({ error: "Affiliate not found" }, { status: 404 });
 
-      const { data: approved } = await sb().from("affiliate_conversions").select("id, commission_amount").eq("affiliate_id", affiliate_id).eq("status", "approved");
+      // Claim the approved conversions in one conditional update before paying.
+      // A second concurrent request (two tabs, a retry) claims nothing and stops
+      // here, so the same commissions can't be paid out twice.
+      const paidAt = new Date().toISOString();
+      const { data: approved } = await sb().from("affiliate_conversions")
+        .update({ status: "paid", paid_at: paidAt })
+        .eq("affiliate_id", affiliate_id)
+        .eq("status", "approved")
+        .select("id, commission_amount");
       if (!approved?.length) return NextResponse.json({ error: "No approved conversions" }, { status: 400 });
 
       const total = approved.reduce((s, c) => s + Number(c.commission_amount), 0);
-      const { data: payout } = await sb().from("affiliate_payouts").insert({
+      const { data: payout, error: payoutError } = await sb().from("affiliate_payouts").insert({
         affiliate_id,
         period: period ?? new Date().toISOString().slice(0, 7),
         total_amount: Math.round(total * 100) / 100,
@@ -126,14 +134,15 @@ export async function POST(req: NextRequest) {
         payout_handle: aff.payout_handle,
         stripe_memo: memo ?? null,
         status: "paid",
-        paid_at: new Date().toISOString(),
+        paid_at: paidAt,
       }).select("id").maybeSingle();
 
-      if (payout) {
-        await sb().from("affiliate_conversions")
-          .update({ status: "paid", paid_at: new Date().toISOString(), payout_id: payout.id })
-          .in("id", approved.map((c) => c.id));
+      if (!payout) {
+        // Release the claim so the payout can be retried.
+        await sb().from("affiliate_conversions").update({ status: "approved", paid_at: null }).in("id", approved.map((c) => c.id));
+        return NextResponse.json({ error: `Failed to record payout: ${payoutError?.message ?? "unknown error"}` }, { status: 500 });
       }
+      await sb().from("affiliate_conversions").update({ payout_id: payout.id }).in("id", approved.map((c) => c.id));
 
       const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
       await sendEmail(aff.email, `Your payout of $${total.toFixed(2)} has been sent! 💸`,

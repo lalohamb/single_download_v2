@@ -51,14 +51,20 @@ export async function GET(req: NextRequest) {
 
   const { data: orders } = await sb()
     .from("orders")
-    .select("id, status, fulfillment_status, tracking_number, tracking_url, shipping_name, shipping_address, subtotal, shipping_cost, total, discount_amount, discount_code, items, created_at, printify_order_id")
-    .eq("email", email)
+    .select("id, status, fulfillment_status, tracking_number, tracking_url, shipping_name, shipping_address, subtotal, shipping_cost, total, discount_amount, discount_code, items, created_at, printify_order_id, stripe_session_id")
+    // Case-insensitive: orders created before emails were normalized kept the
+    // customer's capitalization. LIKE wildcards in the address are escaped.
+    .ilike("email", email.replace(/[\\%_]/g, (c) => `\\${c}`))
     .order("created_at", { ascending: false })
     .limit(50);
 
-  const order = (orders ?? []).find(
-    (o) => o.id.slice(-8).toUpperCase() === orderId
+  // Order numbers are the last 8 of the order id. Confirmation emails sent
+  // before 2026-10-22 used the last 8 of the Stripe session id; accept both.
+  const match = (orders ?? []).find(
+    (o) => o.id.slice(-8).toUpperCase() === orderId || (o.stripe_session_id ?? "").slice(-8).toUpperCase() === orderId
   );
+  const order = match ? { ...match } : undefined;
+  if (order) delete (order as { stripe_session_id?: string | null }).stripe_session_id; // not returned to the client
 
   if (!order)
     return NextResponse.json({ error: "No order found matching that ID and email address" }, { status: 404 });

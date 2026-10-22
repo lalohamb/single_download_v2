@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { clientIp } from "@/lib/client-ip";
 
 export const runtime = "nodejs";
 
@@ -7,9 +8,6 @@ const attempts = new Map<string, { count: number; windowStart: number }>();
 const WINDOW_MS = 60 * 60 * 1000;
 const MAX_PER_WINDOW = 20;
 
-function getIp(req: NextRequest) {
-  return req.headers.get("x-forwarded-for")?.split(",")[0].trim() || req.headers.get("x-real-ip") || "unknown";
-}
 
 function isRateLimited(ip: string): boolean {
   const now = Date.now();
@@ -27,7 +25,7 @@ function sb() {
 }
 
 export async function POST(req: NextRequest) {
-  if (isRateLimited(getIp(req))) return NextResponse.json({ ok: false }, { status: 429 });
+  if (isRateLimited(clientIp(req))) return NextResponse.json({ ok: false }, { status: 429 });
 
   const { code, referrer, user_agent } = await req.json();
   if (!code || typeof code !== "string") return NextResponse.json({ ok: false });

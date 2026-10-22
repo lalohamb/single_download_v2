@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { clientIp } from "@/lib/client-ip";
 import { createHmac, randomInt } from "crypto";
 
 export const runtime = "nodejs";
@@ -9,9 +10,6 @@ const WINDOW_MS = 60 * 60 * 1000;
 const MAX_PER_WINDOW = 5;
 const OTP_TTL_MS = 10 * 60 * 1000;
 
-function getIp(req: NextRequest) {
-  return req.headers.get("x-forwarded-for")?.split(",")[0].trim() || req.headers.get("x-real-ip") || "unknown";
-}
 
 function isRateLimited(ip: string): boolean {
   const now = Date.now();
@@ -44,7 +42,7 @@ export async function POST(req: NextRequest) {
   const secret = process.env.AFFILIATE_SESSION_SECRET;
   if (!secret) return NextResponse.json({ error: "Server misconfigured." }, { status: 500 });
 
-  if (isRateLimited(getIp(req))) {
+  if (isRateLimited(clientIp(req))) {
     return NextResponse.json({ error: "Too many requests. Please try again later." }, { status: 429 });
   }
 

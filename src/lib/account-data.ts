@@ -85,6 +85,14 @@ export function getCustomerProfile(user: User | null): CustomerProfile {
   };
 }
 
+// Only the address the customer actually saved, with no sample values filled in.
+// Checkout prefills from this, so a customer without a saved address is never
+// shipped to the demo address in SAMPLE_CUSTOMER.
+export function getSavedAddress(user: User | null): Partial<CustomerAddress> {
+  const saved = ((user?.user_metadata || {}) as UserMetadata).address || {};
+  return Object.fromEntries(Object.entries(saved).filter(([, v]) => typeof v === "string" && v.trim())) as Partial<CustomerAddress>;
+}
+
 export function formatAddress(address: CustomerAddress): string {
   return [address.line1, address.line2, `${address.city}, ${address.state} ${address.zip}`, address.country]
     .filter(Boolean)

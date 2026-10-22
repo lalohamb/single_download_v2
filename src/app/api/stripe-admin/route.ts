@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { requireAdmin } from "@/lib/require-admin";
-import { getStripeConfig } from "@/lib/stripe-config";
+import { getStripeConfig, STRIPE_WEBHOOK_EVENTS } from "@/lib/stripe-config";
 import { getErrorMessage } from "@/lib/errors";
 import { createClient } from "@supabase/supabase-js";
+import { adjustCommissionsForRefund } from "@/lib/affiliate-refunds";
 
 export const runtime = "nodejs";
 
@@ -115,6 +116,16 @@ export async function POST(req: NextRequest) {
       }
       const refund = await stripe.refunds.create(params);
 
+      // Void (full refund) or reduce (partial) any unpaid affiliate commission.
+      try {
+        const refundedCharge = await stripe.charges.retrieve(charge_id);
+        if (typeof refundedCharge.payment_intent === "string") {
+          await adjustCommissionsForRefund(sbService(), refundedCharge.payment_intent, refundedCharge.amount, refundedCharge.amount_refunded);
+        }
+      } catch (commissionErr) {
+        console.error("Commission adjustment after refund failed:", getErrorMessage(commissionErr));
+      }
+
       // Send refund confirmation email
       try {
         const supabase = sbService();
@@ -127,7 +138,7 @@ export async function POST(req: NextRequest) {
             ? await supabase.from("orders").select("email, shipping_name, total, id").eq("stripe_payment_intent_id", paymentIntentId).maybeSingle()
             : { data: null };
           const { data: emailSettings } = await supabase.from("settings").select("store_name, email_from, email_support").limit(1).maybeSingle();
-          const fromAddr = emailSettings?.email_from || process.env.RESEND_API_KEY || "orders@your-store.example";
+          const fromAddr = emailSettings?.email_from || process.env.EMAIL_FROM || "orders@your-store.example";
           const supportAddr = emailSettings?.email_support || emailSettings?.email_from || "hello@your-store.example";
           const storeName = emailSettings?.store_name || "Your Store";
           const customerEmail = order?.email || charge.billing_details?.email;
@@ -191,7 +202,7 @@ export async function POST(req: NextRequest) {
       }
       const endpoint = await client.webhookEndpoints.create({
         url: webhook_url,
-        enabled_events: ["checkout.session.completed", "payment_intent.payment_failed"],
+        enabled_events: [...STRIPE_WEBHOOK_EVENTS],
       });
       return NextResponse.json({ webhook_id: endpoint.id, signing_secret: endpoint.secret, livemode: !secret_key.startsWith("sk_test"), reused: false });
     }

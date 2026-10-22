@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { clientIp } from "@/lib/client-ip";
 
 export const runtime = "nodejs";
 
@@ -11,13 +12,6 @@ const attempts = new Map<string, { count: number; windowStart: number }>();
 const WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const MAX_PER_WINDOW = 5;          // max OTP requests per IP per hour
 
-function getIp(req: NextRequest): string {
-  return (
-    req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
-    req.headers.get("x-real-ip") ||
-    "unknown"
-  );
-}
 
 function isRateLimited(ip: string): boolean {
   const now = Date.now();
@@ -35,7 +29,7 @@ function isRateLimited(ip: string): boolean {
 }
 
 export async function POST(req: NextRequest) {
-  const ip = getIp(req);
+  const ip = clientIp(req);
 
   if (isRateLimited(ip)) {
     return NextResponse.json(

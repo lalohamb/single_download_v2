@@ -162,7 +162,9 @@ Deno.serve(async (req: Request) => {
     const isLiveMode = modeSettings?.stripe_mode ? isLiveModeBySettings : isLiveModeByKey;
 
     const body = sanitize(await req.json());
-    const { items, shipping_address, shipping_name, email, affiliate_code, marketing_opt_in, attribution } = body;
+    const { items, shipping_address, shipping_name, affiliate_code, marketing_opt_in, attribution } = body;
+    // Stored lowercase so guest order tracking (which lowercases its input) matches.
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : body.email;
 
     // Resolve authenticated user_id from JWT (never trust client-supplied value directly)
     let verifiedUserId: string | null = null;
@@ -295,6 +297,16 @@ Deno.serve(async (req: Request) => {
         }]
       : [];
 
+    // The webhook fulfils from orders.items (full list). This compact copy is
+    // only a fallback and is included only when it fits Stripe's 500-character
+    // metadata limit; truncated JSON would be unparseable.
+    const compactItems = JSON.stringify(verifiedItems.map((item) => ({
+      printify_id: item.printify_id,
+      variant_id: item.variant_id,
+      quantity: item.quantity,
+      ...(item.personalization_text ? { pt: item.personalization_text } : {}),
+    })));
+
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       customer_email: email,
@@ -309,12 +321,7 @@ Deno.serve(async (req: Request) => {
         shipping_cost: String(resolvedShipping),
         subtotal: String(verifiedSubtotal),
         total: String(verifiedTotal),
-        items: JSON.stringify(verifiedItems.map((item) => ({
-          printify_id: item.printify_id,
-          variant_id: item.variant_id,
-          quantity: item.quantity,
-          ...(item.personalization_text ? { pt: item.personalization_text.slice(0, 50) } : {}),
-        }))).slice(0, 500),
+        ...(compactItems.length <= 500 ? { items: compactItems } : {}),
         marketing_opt_in: marketing_opt_in ? "true" : "false",
         ...(affiliate_code ? { affiliate_code: String(affiliate_code).slice(0, 50) } : {}),
         ...(body.phone ? { phone: String(body.phone).slice(0, 20) } : {}),

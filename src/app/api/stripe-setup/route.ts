@@ -1,15 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { requireAdmin } from "@/lib/require-admin";
-import { getStripeSettings, saveStripeKeys, setStripeMode } from "@/lib/stripe-config";
+import { getStripeSettings, saveStripeKeys, setStripeMode, pushStripeSecretsToEdge, STRIPE_WEBHOOK_EVENTS } from "@/lib/stripe-config";
 import { getErrorMessage } from "@/lib/errors";
 
 export const runtime = "nodejs";
 
-const WEBHOOK_EVENTS: Stripe.WebhookEndpointCreateParams.EnabledEvent[] = [
-  "checkout.session.completed",
-  "payment_intent.payment_failed",
-];
+const WEBHOOK_EVENTS: Stripe.WebhookEndpointCreateParams.EnabledEvent[] = [...STRIPE_WEBHOOK_EVENTS];
+
+// Keys saved for the mode the store is (or is about to be) running in must also
+// reach the edge functions, or checkout and the webhook keep the old key/secret
+// and every webhook fails signature verification. Non-fatal, like stripe-switch.
+async function syncEdgeSecrets(mode: "live" | "test", activate: boolean, secretKey: string, webhookSecret: string, steps: string[]) {
+  const activeMode = (await getStripeSettings())?.stripe_mode;
+  if (!activate && activeMode !== mode) return null;
+  try {
+    await pushStripeSecretsToEdge(secretKey, webhookSecret);
+    steps.push("edge function secrets updated");
+    return null;
+  } catch (e: unknown) {
+    const warning = `Edge function secrets NOT updated: ${getErrorMessage(e)}. Payments may fail webhook verification until secrets are synced (redeploy or switch mode).`;
+    steps.push(`⚠ ${warning}`);
+    console.warn("Supabase secrets push failed (non-fatal):", warning);
+    return warning;
+  }
+}
 
 function getWebhookUrl(): string {
   return `https://${process.env.SUPABASE_PROJECT_REF}.supabase.co/functions/v1/stripe-webhook`;
@@ -48,7 +63,8 @@ export async function POST(req: NextRequest) {
         await setStripeMode(mode);
         steps.push(`stripe_mode set to ${mode}`);
       }
-      return NextResponse.json({ ok: true, mode, activated: activate, steps });
+      const warning = await syncEdgeSecrets(mode, activate, secret_key, webhook_secret, steps);
+      return NextResponse.json({ ok: true, mode, activated: activate, steps, ...(warning ? { warning } : {}) });
     }
     // Save keys to DB directly — webhook registration is optional and can be done separately
     const webhookUrl = getWebhookUrl();
@@ -65,6 +81,11 @@ export async function POST(req: NextRequest) {
       if (savedSecret) {
         webhookSecret = savedSecret;
         steps.push("Webhook already registered — reused existing endpoint");
+        const missing = WEBHOOK_EVENTS.filter((e) => !match.enabled_events.includes(e));
+        if (missing.length > 0) {
+          await client.webhookEndpoints.update(match.id, { enabled_events: WEBHOOK_EVENTS });
+          steps.push(`Webhook events updated (+${missing.join(", ")})`);
+        }
       } else {
         // Secret not in DB (Stripe only returns it once) — delete and recreate to get a fresh one
         await client.webhookEndpoints.del(match.id);
@@ -87,7 +108,8 @@ export async function POST(req: NextRequest) {
       steps.push(`stripe_mode set to ${mode}`);
     }
 
-    return NextResponse.json({ ok: true, mode, activated: activate, steps });
+    const warning = await syncEdgeSecrets(mode, activate, secret_key, webhookSecret ?? "", steps);
+    return NextResponse.json({ ok: true, mode, activated: activate, steps, ...(warning ? { warning } : {}) });
   } catch (e: unknown) {
     return NextResponse.json({ error: getErrorMessage(e), steps }, { status: 500 });
   }

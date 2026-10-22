@@ -10,6 +10,73 @@ function json(data: unknown, status = 200) {
   });
 }
 
+function safeParse<T>(raw: string | undefined | null, fallback: T): T {
+  if (!raw) return fallback;
+  try { return JSON.parse(raw) as T; } catch { return fallback; }
+}
+
+// The address the customer entered on Stripe's checkout page is the one they
+// confirmed; it replaces the pre-checkout form address. API 2025-03+ moved it
+// to collected_information.shipping_details.
+function stripeShipping(session: Stripe.Checkout.Session): { name: string; address: Record<string, string> } | null {
+  const s = session as unknown as {
+    collected_information?: { shipping_details?: { name?: string; address?: Stripe.Address } };
+    shipping_details?: { name?: string; address?: Stripe.Address };
+  };
+  const details = s.collected_information?.shipping_details ?? s.shipping_details;
+  const a = details?.address;
+  if (!a?.line1) return null;
+  return {
+    name: details?.name || "",
+    address: {
+      line1: a.line1,
+      ...(a.line2 ? { line2: a.line2 } : {}),
+      city: a.city || "",
+      state: a.state || "",
+      zip: a.postal_code || "",
+      country: a.country || "US",
+    },
+  };
+}
+
+// Same logic as src/lib/affiliate-refunds.ts (used by the admin refund route).
+// Full refund voids unpaid commissions; partial refunds scale them from the
+// original base, so repeated or duplicate events give the same result.
+async function adjustCommissionsForRefund(
+  supabase: any,
+  paymentIntentId: string,
+  chargeAmount: number,
+  amountRefunded: number,
+): Promise<{ adjusted: number; paidOut: number }> {
+  const { data: order } = await supabase.from("orders").select("id").eq("stripe_payment_intent_id", paymentIntentId).maybeSingle();
+  if (!order) return { adjusted: 0, paidOut: 0 };
+
+  const { data: conversions } = await supabase
+    .from("affiliate_conversions")
+    .select("id, affiliate_id, order_subtotal, status")
+    .eq("order_id", order.id);
+  if (!conversions?.length) return { adjusted: 0, paidOut: 0 };
+
+  const remaining = chargeAmount > 0 ? Math.max(0, (chargeAmount - amountRefunded) / chargeAmount) : 0;
+  let adjusted = 0;
+  let paidOut = 0;
+  for (const conv of conversions) {
+    if (conv.status === "paid") { paidOut++; continue; }
+    if (conv.status !== "pending" && conv.status !== "approved") continue;
+    if (remaining === 0) {
+      await supabase.from("affiliate_conversions").update({ status: "voided" }).eq("id", conv.id);
+    } else {
+      const { data: affiliate } = await supabase.from("affiliates").select("commission_rate").eq("id", conv.affiliate_id).maybeSingle();
+      const rate = Number(affiliate?.commission_rate ?? 0);
+      const commission = Math.round(Number(conv.order_subtotal) * rate * remaining * 100) / 100;
+      await supabase.from("affiliate_conversions").update({ commission_amount: commission }).eq("id", conv.id);
+    }
+    adjusted++;
+  }
+  if (paidOut > 0) console.warn(`Refund on ${paymentIntentId}: ${paidOut} commission(s) already paid out; not adjusted`);
+  return { adjusted, paidOut };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") {
     return json({ error: "Method not allowed" }, 405);
@@ -57,20 +124,39 @@ Deno.serve(async (req: Request) => {
           || firstDiscount?.coupon?.id
           || null;
 
+        const shipping = stripeShipping(expandedSession);
+
+        // Claim the order: only a pending row moves to paid, so a Stripe retry
+        // or a concurrent duplicate delivery updates nothing and is skipped.
         const { data: updatedOrder } = await supabase
           .from("orders")
           .update({
             status: "paid",
             stripe_payment_intent_id: paymentIntentId,
             livemode: event.livemode,
+            ...(shipping ? { shipping_address: shipping.address, ...(shipping.name ? { shipping_name: shipping.name } : {}) } : {}),
             updated_at: new Date().toISOString(),
             total: (expandedSession.amount_total ?? 0) / 100,
             ...(discountAmount > 0 ? { discount_amount: discountAmount } : {}),
             ...(discountCode ? { discount_code: discountCode } : {}),
           })
           .eq("stripe_session_id", session.id)
-          .select("id, subtotal, affiliate_code")
+          .eq("status", "pending")
+          .select("id, subtotal, affiliate_code, items, shipping_address, shipping_name")
           .maybeSingle();
+
+        if (!updatedOrder) {
+          const { data: existing } = await supabase.from("orders").select("status").eq("stripe_session_id", session.id).maybeSingle();
+          if (existing) {
+            console.log(`Duplicate checkout.session.completed for ${session.id} (order already ${existing.status}); skipping`);
+            return json({ received: true, duplicate: true });
+          }
+          console.error(`No order row for session ${session.id}; continuing with session metadata only`);
+        }
+
+        // Customer-facing order number: same as the success page, account pages
+        // and guest tracking lookup (last 8 of the order id), not the session id.
+        const orderRef = (updatedOrder?.id ?? session.id).slice(-8).toUpperCase();
 
         // Send Purchase event to Meta CAPI
         const fbAccessToken = Deno.env.get("FACEBOOK_ACCESS_TOKEN");
@@ -107,9 +193,12 @@ Deno.serve(async (req: Request) => {
           }).catch((e: Error) => console.error("Meta CAPI error:", String(e?.message ?? e).replace(/[\r\n]/g, " ")));
         }
 
-        // Record affiliate conversion
+        // Record affiliate conversion. Commission is on what the customer actually
+        // paid for products: after discounts, excluding shipping and tax.
         const affiliateCode = updatedOrder?.affiliate_code || session.metadata?.affiliate_code;
-        if (affiliateCode && updatedOrder?.subtotal) {
+        const totals = expandedSession.total_details;
+        const commissionBase = Math.max(0, ((expandedSession.amount_total ?? 0) - (totals?.amount_shipping ?? 0) - (totals?.amount_tax ?? 0)) / 100);
+        if (affiliateCode && updatedOrder && commissionBase > 0) {
           const { data: affiliate } = await supabase
             .from("affiliates")
             .select("id, commission_rate, email")
@@ -118,11 +207,11 @@ Deno.serve(async (req: Request) => {
             .maybeSingle();
 
           if (affiliate) {
-            const commission = Math.round(updatedOrder.subtotal * affiliate.commission_rate * 100) / 100;
+            const commission = Math.round(commissionBase * affiliate.commission_rate * 100) / 100;
             await supabase.from("affiliate_conversions").insert({
               affiliate_id: affiliate.id,
               order_id: updatedOrder.id,
-              order_subtotal: updatedOrder.subtotal,
+              order_subtotal: commissionBase,
               commission_amount: commission,
               status: "pending",
             });
@@ -145,7 +234,7 @@ Deno.serve(async (req: Request) => {
                     <h2 style="color:#111">New Sale!</h2>
                     <p>Someone just purchased through your referral link.</p>
                     <table style="width:100%;border-collapse:collapse;margin:24px 0">
-                      <tr><td style="padding:8px 0;color:#666">Order Value</td><td style="padding:8px 0;font-weight:600;text-align:right">$${updatedOrder.subtotal.toFixed(2)}</td></tr>
+                      <tr><td style="padding:8px 0;color:#666">Order Value</td><td style="padding:8px 0;font-weight:600;text-align:right">$${commissionBase.toFixed(2)}</td></tr>
                       <tr><td style="padding:8px 0;color:#666">Your Commission</td><td style="padding:8px 0;font-weight:700;color:#16a34a;text-align:right">$${commission.toFixed(2)}</td></tr>
                       <tr><td style="padding:8px 0;color:#666">Status</td><td style="padding:8px 0;text-align:right">Pending (14-day review)</td></tr>
                     </table>
@@ -184,13 +273,11 @@ Deno.serve(async (req: Request) => {
         const storeName = emailSettings?.store_name || "Your Store";
         if (resendKey && session.metadata?.email) {
           const customerEmail = session.metadata.email;
-          // Fetch full items from DB (has image_url, stripped from metadata to avoid Stripe 500-char limit)
-          const { data: orderRow } = await supabase
-            .from("orders")
-            .select("items")
-            .eq("stripe_session_id", session.id)
-            .maybeSingle();
-          const orderItems = orderRow?.items ?? (session.metadata?.items ? JSON.parse(session.metadata.items) : []);
+          // A failed email must not stop fulfillment below: a retry of this event
+          // is skipped as a duplicate once the order is marked paid.
+          try {
+          // Full items (with image_url) come from the order row.
+          const orderItems = updatedOrder?.items ?? safeParse<any[]>(session.metadata?.items, []);
           const itemsHtml = orderItems.map((item: any) =>
             `<tr>
               <td style="padding:12px 0;vertical-align:top">
@@ -210,17 +297,17 @@ Deno.serve(async (req: Request) => {
             body: JSON.stringify({
               from: `${storeName} <${fromAddr}>`,
               to: customerEmail,
-              subject: `Order Confirmed – #${session.id.slice(-8).toUpperCase()}`,
+              subject: `Order Confirmed – #${orderRef}`,
               html: `<div style="font-family:sans-serif;max-width:600px;margin:0 auto">
                 <h2>Thanks for your order, ${session.metadata.shipping_name?.split(" ")[0]}!</h2>
-                <p>Your order <strong>#${session.id.slice(-8).toUpperCase()}</strong> has been confirmed and is being processed.</p>
+                <p>Your order <strong>#${orderRef}</strong> has been confirmed and is being processed.</p>
                 <table style="width:100%;border-collapse:collapse">${itemsHtml}</table>
                 <hr/>
                 <p><strong>Total: $${((session.amount_total ?? 0) / 100).toFixed(2)}</strong></p>
                 <p>We'll send you another email when your order ships.</p>
                 <p></p>
                 <p>If you have any questions, feel free to reply to this email </p>
-                <p>or contact us at <a href="mailto:${supportAddr}?subject=Regarding%20Order%20%23${session.id.slice(-8).toUpperCase()}">${supportAddr}</a></p>
+                <p>or contact us at <a href="mailto:${supportAddr}?subject=Regarding%20Order%20%23${orderRef}">${supportAddr}</a></p>
                 <p>Thanks for supporting our small business!</p>
                 <p>— ${storeName}</p>
               </div>`,
@@ -230,69 +317,111 @@ Deno.serve(async (req: Request) => {
             const resendErr = await resendRes.text();
             console.error("Resend error:", resendRes.status, resendErr.replace(/[\r\n]/g, " "));
           }
+          } catch (emailErr) {
+            console.error("Order confirmation email failed:", String((emailErr as Error)?.message ?? emailErr).replace(/[\r\n]/g, " "));
+          }
         }
 
         // Optionally forward to Printify for fulfillment
+        // Record the fulfillment outcome on the order so failures are visible in
+        // admin (Orders → Fulfillment) instead of only in function logs.
+        const recordFulfillment = async (status: string, extra: Record<string, unknown> = {}) => {
+          await supabase
+            .from("orders")
+            .update({ fulfillment_status: status, updated_at: new Date().toISOString(), ...extra })
+            .eq("stripe_session_id", session.id);
+        };
+        const failFulfillment = async (reason: string) => {
+          console.error(`Printify submission failed for ${session.id}: ${reason}`.replace(/[\r\n]/g, " "));
+          await recordFulfillment(`printify_failed: ${reason}`.slice(0, 200));
+        };
+
         const printifyToken = Deno.env.get("PRINTIFY_API_TOKEN");
         const { data: settingsData } = await supabase.from("settings").select("printify_shop_id").limit(1).maybeSingle();
         const printifyShopId = settingsData?.printify_shop_id || Deno.env.get("PRINTIFY_SHOP_ID");
 
-        if (printifyToken && printifyShopId && session.metadata?.items) {
+        // Test-mode payments must not create real (billable) Printify orders.
+        // Set PRINTIFY_SUBMIT_TEST_ORDERS=true to submit them anyway.
+        if (!event.livemode && Deno.env.get("PRINTIFY_SUBMIT_TEST_ORDERS") !== "true") {
+          console.log(`Test-mode payment ${session.id}: not submitted to Printify`);
+          await recordFulfillment("test_mode_not_submitted");
+        } else if (!printifyToken || !printifyShopId) {
+          await failFulfillment("Printify is not configured (token or shop id missing)");
+        } else {
           try {
-            const items = JSON.parse(session.metadata.items);
-            const shippingAddress = JSON.parse(session.metadata.shipping_address || "{}");
+            // Full item list from the order row; the metadata copy is only a
+            // fallback for orders created before this change.
+            const rows: any[] = updatedOrder?.items ?? safeParse<any[]>(session.metadata?.items, []);
+            const lineItems = rows.map((item: any) => ({
+              product_id: item.printify_id || undefined,
+              variant_id: parseInt(item.variant_id) || undefined,
+              quantity: item.quantity,
+              ...(item.personalization_text || item.pt ? { print_details: [{ print_on_side: "front", text: item.personalization_text || item.pt }] } : {}),
+            }));
+            const missing = lineItems.filter((li) => !li.product_id || !li.variant_id).length;
 
-            const printifyOrder: any = {
-              external_id: session.id,
-              label: `BS-${session.id.slice(-8)}`,
-              line_items: items.map((item: any) => ({
-                product_id: item.printify_id || undefined,
-                variant_id: parseInt(item.variant_id) || undefined,
-                quantity: item.quantity,
-                ...(item.personalization_text || item.pt ? { print_details: [{ print_on_side: "front", text: item.personalization_text || item.pt }] } : {}),
-              })),
-              shipping_method: 1,
-              send_shipping_notification: false,
-              address_to: {
-                first_name: session.metadata.shipping_name?.split(" ")[0] || "",
-                last_name: session.metadata.shipping_name?.split(" ").slice(1).join(" ") || "",
-                email: session.metadata.email || "",
-                phone: session.customer_details?.phone || session.metadata?.phone || "0000000000",
-                country: shippingAddress.country || "US",
-                region: shippingAddress.state || "",
-                city: shippingAddress.city || "",
-                address1: shippingAddress.line1 || "",
-                address2: shippingAddress.line2 || "",
-                zip: shippingAddress.zip || "",
-              },
-            };
+            const address: Record<string, string> = shipping?.address ?? updatedOrder?.shipping_address ?? safeParse(session.metadata?.shipping_address, {});
+            const fullName = shipping?.name || updatedOrder?.shipping_name || session.metadata?.shipping_name || "";
 
-            const printifyRes = await fetch(
-              `https://api.printify.com/v1/shops/${printifyShopId}/orders.json`,
-              {
-                method: "POST",
-                headers: {
-                  Authorization: `Bearer ${printifyToken}`,
-                  "Content-Type": "application/json",
+            if (lineItems.length === 0) {
+              await failFulfillment("no line items found for this order");
+            } else if (missing > 0) {
+              await failFulfillment(`${missing} item(s) have no Printify product/variant id`);
+            } else {
+              const printifyOrder = {
+                external_id: session.id,
+                label: `BS-${orderRef}`,
+                line_items: lineItems,
+                shipping_method: 1,
+                send_shipping_notification: false,
+                address_to: {
+                  first_name: fullName.split(" ")[0] || "",
+                  last_name: fullName.split(" ").slice(1).join(" ") || "",
+                  email: session.metadata?.email || session.customer_details?.email || "",
+                  phone: session.customer_details?.phone || session.metadata?.phone || "0000000000",
+                  country: address.country || "US",
+                  region: address.state || "",
+                  city: address.city || "",
+                  address1: address.line1 || "",
+                  address2: address.line2 || "",
+                  zip: address.zip || "",
                 },
-                body: JSON.stringify(printifyOrder),
-              }
-            );
+              };
 
-            if (printifyRes.ok) {
-              const printifyOrderData = await printifyRes.json();
-              await supabase
-                .from("orders")
-                .update({
-                  printify_order_id: String(printifyOrderData.id),
-                  fulfillment_status: printifyOrderData.status || "pending",
-                  updated_at: new Date().toISOString(),
-                })
-                .eq("stripe_session_id", session.id);
+              const printifyRes = await fetch(
+                `https://api.printify.com/v1/shops/${printifyShopId}/orders.json`,
+                {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${printifyToken}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify(printifyOrder),
+                }
+              );
+
+              if (printifyRes.ok) {
+                const printifyOrderData = await printifyRes.json();
+                await recordFulfillment(printifyOrderData.status || "pending", { printify_order_id: String(printifyOrderData.id) });
+              } else {
+                const detail = (await printifyRes.text()).slice(0, 120);
+                await failFulfillment(`HTTP ${printifyRes.status} ${detail}`);
+              }
             }
           } catch (printifyErr) {
-            console.error("Printify order submission failed:", String((printifyErr as any)?.message ?? printifyErr).replace(/[\r\n]/g, " "));
+            await failFulfillment(String((printifyErr as Error)?.message ?? printifyErr));
           }
+        }
+        break;
+      }
+
+      case "charge.refunded": {
+        // Refunds made in the Stripe dashboard (admin-page refunds also adjust
+        // directly; the calculation is idempotent, so both running is safe).
+        const charge = event.data.object as Stripe.Charge;
+        const paymentIntentId = typeof charge.payment_intent === "string" ? charge.payment_intent : charge.payment_intent?.id;
+        if (paymentIntentId) {
+          await adjustCommissionsForRefund(supabase, paymentIntentId, charge.amount, charge.amount_refunded);
         }
         break;
       }

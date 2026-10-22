@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { ChevronLeft, Lock, Check, Loader2, Truck } from "lucide-react";
 import { useCart } from "@/lib/cart";
-import { getCustomerProfile } from "@/lib/account-data";
+import { getCustomerProfile, getSavedAddress } from "@/lib/account-data";
 import { useCustomerAuth } from "@/lib/customer-auth";
 import { formatPrice, createStripeCheckout, getShippingQuote } from "@/lib/supabase";
 import { trackBeginCheckout } from "@/lib/analytics";
@@ -36,18 +36,19 @@ export default function CheckoutPage() {
   useEffect(() => {
     if (!user) return;
     const profile = getCustomerProfile(user);
+    const saved = getSavedAddress(user);
     const [firstName = "", ...lastNameParts] = profile.fullName.split(" ");
     setForm((prev) => ({
       ...prev,
       email: prev.email || profile.email,
       firstName: prev.firstName || firstName,
       lastName: prev.lastName || lastNameParts.join(" "),
-      address1: prev.address1 || profile.address.line1,
-      address2: prev.address2 || profile.address.line2 || "",
-      city: prev.city || profile.address.city,
-      state: prev.state || profile.address.state,
-      zip: prev.zip || profile.address.zip,
-      country: prev.country || profile.address.country,
+      address1: prev.address1 || saved.line1 || "",
+      address2: prev.address2 || saved.line2 || "",
+      city: prev.city || saved.city || "",
+      state: prev.state || saved.state || "",
+      zip: prev.zip || saved.zip || "",
+      country: prev.country || saved.country || "US",
     }));
   }, [user]);
 

@@ -12,7 +12,8 @@ register_webhook() {
     -u "${secret_key}:" \
     --data-urlencode "url=${endpoint_url}" \
     -d "enabled_events[]=checkout.session.completed" \
-    -d "enabled_events[]=payment_intent.payment_failed")
+    -d "enabled_events[]=payment_intent.payment_failed" \
+    -d "enabled_events[]=charge.refunded")
 
   local http_code body
   http_code=$(echo "$response" | tail -1)
